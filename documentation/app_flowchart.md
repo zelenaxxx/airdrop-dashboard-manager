@@ -1,14 +1,14 @@
 flowchart TD
-  Start[Landing Page]
-  SignUpPage[Sign Up Page]
-  SignInPage[Sign In Page]
-  AuthAPI[Authentication API Endpoint]
-  DashboardPage[Dashboard Page]
-  Start -->|Select Sign Up| SignUpPage
-  Start -->|Select Sign In| SignInPage
-  SignUpPage -->|Submit Credentials| AuthAPI
-  SignInPage -->|Submit Credentials| AuthAPI
-  AuthAPI -->|Success| DashboardPage
-  AuthAPI -->|Error| SignUpPage
-  AuthAPI -->|Error| SignInPage
-  DashboardPage -->|Click Logout| Start
+    subgraph Layout
+        L[Root Layout]
+    end
+    L --> B[Sign-In Page]
+    L --> C[Sign-Up Page]
+    L --> F[Dashboard Page]
+    B --> D[Submit Sign-In]
+    C --> D[Submit Sign-Up]
+    D --> E[Auth API Route]
+    E -- Success --> F
+    E -- Failure --> G[Show Auth Error]
+    F --> H[Fetch Airdrop Data]
+    H --> I[Display Dashboard Metrics]
