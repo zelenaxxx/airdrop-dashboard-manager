@@ -1,179 +1,185 @@
-# Backend Structure Document
-
-This document outlines the backend architecture, hosting, and infrastructure for the **codeguide-starter** project. It uses plain language so anyone can understand how the backend is set up and how it supports the application.
+# Backend Structure Document for airdrop-dashboard-manager
 
 ## 1. Backend Architecture
 
-- **Framework and Design Pattern**
-  - We use **Next.js API Routes** to handle all server-side logic. These routes live alongside the frontend code in the same repository, making development and deployment simpler.
-  - The backend follows a **layered pattern**:
-    1. **API Layer**: Receives requests (login, registration, data fetch).  
-    2. **Service Layer**: Contains the core business logic (user validation, password hashing).  
-    3. **Data Access Layer**: Talks to the database via a simple ORM (e.g., Prisma or TypeORM).
+Overall Design:
+- Built on Node.js and Next.js using the App Router.
+- API routes under `/app/api` handle server-side logic as serverless functions.
+- Follows a service–repository pattern:
+  - **Controller layer** (Next.js API routes) validates requests and returns responses.
+  - **Service layer** contains business logic (e.g., user authentication, campaign management).
+  - **Data access layer** (Prisma ORM) interacts with the database.
 
-- **Scalability**
-  - Stateless API routes can scale horizontally—new instances can spin up on demand.  
-  - We can add caching or a message queue (e.g., Redis or RabbitMQ) without changing the core code.
-
-- **Maintainability**
-  - Code for each feature is grouped by route (authentication, dashboard).  
-  - A service layer separates complex logic from request handling.
-
-- **Performance**
-  - Lightweight Node.js handlers keep response times low.  
-  - Future use of database connection pooling and Redis for caching repeated queries.
+Scalability, Maintainability, Performance:
+- **Serverless functions** auto-scale based on traffic, avoiding idle costs.
+- **Modular code structure** (controllers, services, data access) makes it easy to add features or swap components.
+- **TypeScript** ensures type safety across layers, reducing runtime errors.
+- **Static file serving** (CSS, images) offloads traffic to a CDN for faster load times.
 
 ## 2. Database Management
 
-- **Database Choice**
-  - We recommend **PostgreSQL** for structured data and reliable transactions.  
-  - In-memory caching can be added later with **Redis** for session tokens or frequently read data.
+Technologies:
+- Relational database (SQL): **PostgreSQL**
+- ORM: **Prisma** for schema definitions, migrations, and type-safe queries.
 
-- **Data Storage and Access**
-  - Use an ORM like **Prisma** or **TypeORM** to map JavaScript/TypeScript objects to database tables.
-  - Connection pooling ensures efficient use of database connections under load.
-  - Migrations track schema changes over time, keeping development, staging, and production in sync.
-
-- **Data Practices**
-  - Passwords are never stored in plain text—they are salted and hashed with **bcrypt** before saving.
-  - All outgoing data is typed and validated to prevent malformed records.
+Data Structure and Access:
+- Data defined as tables and relations (one-to-many, many-to-one).
+- Prisma schema holds model definitions and generates a client for queries.
+- Migrations are managed via Prisma Migrate, ensuring versioned changes to the database.
+- Backup strategy: regular RDS snapshots or managed backups in hosted environments.
 
 ## 3. Database Schema
 
-### Human-Readable Format
+Human-readable overview:
+- **User**: Stores account details and login credentials.
+- **Session**: Tracks active sessions or JWT tokens per user.
+- **Campaign**: Represents an airdrop campaign owned by a user.
+- **Participant**: Records each wallet or user registered for a campaign.
 
-- **Users**
-  - **id**: Unique identifier  
-  - **email**: User’s email address (unique)  
-  - **password_hash**: Securely hashed password  
-  - **created_at**: Account creation timestamp
+PostgreSQL schema (SQL):
 
-- **Sessions**
-  - **id**: Unique session record  
-  - **user_id**: Links to a user  
-  - **token**: Random string for authentication  
-  - **expires_at**: When the token stops working  
-  - **created_at**: When the session was created
-
-- **DashboardItems** *(optional for dynamic data)*
-  - **id**: Unique record  
-  - **title**: Item title  
-  - **content**: Item details  
-  - **created_at**: When the item was added
-
-### SQL Schema (PostgreSQL)
 ```sql
--- Users table
-CREATE TABLE users (
+CREATE TABLE "User" (
   id SERIAL PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+  hashed_password TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Sessions table
-CREATE TABLE sessions (
+CREATE TABLE "Session" (
   id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id) ON DELETE CASCADE,
-  token VARCHAR(255) UNIQUE NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+  user_id INTEGER REFERENCES "User"(id) ON DELETE CASCADE,
+  token VARCHAR(512) UNIQUE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- Dashboard items table
-CREATE TABLE dashboard_items (
+CREATE TABLE "Campaign" (
   id SERIAL PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  user_id INTEGER REFERENCES "User"(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  status VARCHAR(50) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE "Participant" (
+  id SERIAL PRIMARY KEY,
+  campaign_id INTEGER REFERENCES "Campaign"(id) ON DELETE CASCADE,
+  wallet_address VARCHAR(66) NOT NULL,
+  eligible BOOLEAN DEFAULT FALSE,
+  distributed BOOLEAN DEFAULT FALSE,
+  distributed_at TIMESTAMP WITH TIME ZONE
 );
 ```  
 
 ## 4. API Design and Endpoints
 
-- **Approach**: We follow a **RESTful** style, grouping related endpoints under `/api` directories.
+Approach:
+- Follows RESTful conventions via Next.js API routes.
+- JSON input/output, HTTP status codes to indicate success or errors.
+- Protected endpoints require a valid JWT or session cookie.
 
-- **Key Endpoints**
-  - `POST /api/auth/register`  
-    • Accepts `{ email, password }`  
-    • Creates a new user and issues a session token  
-  - `POST /api/auth/login`  
-    • Accepts `{ email, password }`  
-    • Verifies credentials and returns a session token  
-  - `POST /api/auth/logout`  
-    • Invalidates the session token on the server  
-  - `GET /api/dashboard/data`  
-    • Requires a valid session  
-    • Returns user-specific data or dashboard items  
+Key Endpoints:
 
-- **Communication**
-  - Frontend sends JSON requests; backend replies with JSON and appropriate HTTP status codes.  
-  - Protected routes check for a valid session token (in cookies or Authorization header).
+Authentication:
+- `POST /api/auth/signup`  
+  Registers a new user (email, password).
+- `POST /api/auth/signin`   
+  Verifies credentials, issues JWT or session cookie.
+- `POST /api/auth/signout`  
+  Invalidates the user’s session.
+
+Dashboard & Campaigns:
+- `GET /api/dashboard/campaigns`  
+  Returns all campaigns for the authenticated user.
+- `POST /api/dashboard/campaigns` 
+  Creates a new airdrop campaign.
+- `GET /api/dashboard/campaigns/:id/participants`  
+  Lists participants for a specific campaign.
+- `POST /api/dashboard/campaigns/:id/participants`  
+  Adds a wallet to the campaign’s participant list.
+
+Metrics & Reports:
+- `GET /api/dashboard/campaigns/:id/metrics`  
+  Returns distribution status, participant counts, and other stats.
 
 ## 5. Hosting Solutions
 
-- **Cloud Provider**:  
-  - **Vercel** (recommended) offers seamless Next.js deployments, auto-scaling, and built-in CDN.  
-  - Alternatively, **Netlify** or any Node.js-capable host will work.
+Primary Hosting:
+- **Vercel** for Next.js deployment (frontend + serverless API endpoints).
+  - Automatic scaling of serverless functions.
+  - Global edge network for fast responses.
 
-- **Benefits**
-  - **Reliability**: Global servers and failover across regions.  
-  - **Scalability**: Auto-scale serverless functions based on traffic.  
-  - **Cost-Effectiveness**: Pay-per-use model means low cost for small projects.
+Database Hosting:
+- **AWS RDS for PostgreSQL** (or a managed equivalent like Supabase).
+  - Automated backups and multi-AZ replication for high availability.
+
+Advantages:
+- Zero-server maintenance with Vercel.
+- Pay-as-you-go pricing for serverless.
+- Global distribution reduces latency for users worldwide.
 
 ## 6. Infrastructure Components
 
-- **Load Balancer**
-  - Provided by the hosting platform—distributes API requests across function instances.
+Load Balancing:
+- Built into Vercel’s edge network, routing requests to the nearest endpoint.
 
-- **CDN (Content Delivery Network)**
-  - Vercel’s global edge network caches static assets (CSS, JS, images) for faster page loads.
+Caching:
+- **Redis** (e.g., AWS ElastiCache or Upstash) for:
+  - Session store or JWT blacklist.
+  - Frequent read-heavy queries (campaign lists, metrics).
+- HTTP-level caching with **Cache-Control** headers on static assets.
 
-- **Caching**
-  - **Redis** (optional) for session storage or caching dashboard queries to reduce database load.
+Content Delivery Network (CDN):
+- Vercel’s built-in CDN for all static files and cached API responses.
 
-- **Object Storage**
-  - For file uploads or backups, integrate with AWS S3 or similar services.
-
-- **Message Queue**
-  - In future, use **RabbitMQ** or **Kafka** for background tasks (e.g., email notifications).
+Logging & Tracing:
+- **Sentry** for error tracking and performance monitoring.
+- Vercel Logs or **Datadog** for request/response logs and metrics.
 
 ## 7. Security Measures
 
-- **Authentication & Authorization**
-  - Passwords hashed with **bcrypt** and salted.  
-  - Session tokens stored in secure, HttpOnly cookies or Authorization headers.  
-  - Protected endpoints verify tokens before proceeding.
+Authentication & Authorization:
+- Passwords hashed with **bcrypt** before storage.
+- JWT tokens signed with a strong secret key, short TTLs.
+- Protected API routes check for valid tokens or session cookies.
 
-- **Data Encryption**
-  - **HTTPS/TLS** encrypts data in transit.  
-  - Database connections use SSL to encrypt data between the app and the database.
+Data Protection:
+- All traffic over **HTTPS**.
+- Database encryption at rest (RDS-managed).
+- Environment variables (secrets) stored securely (Vercel env vars).
 
-- **Input Validation**
-  - Every incoming request is validated (e.g., valid email format, password length) to prevent SQL injection or other attacks.
+Request Validation & Rate Limiting:
+- Input validated server-side using a schema validator (e.g., Zod).
+- Rate limiting middleware on auth routes to prevent brute-force attacks.
 
-- **Web Security Best Practices**
-  - Enable **CORS** policies to limit allowed origins.  
-  - Use **CSRF tokens** or same-site cookies to prevent cross-site requests.  
-  - Set secure headers with **Helmet** or a similar middleware.
+Compliance:
+- Adheres to GDPR guidelines: users can request data deletion.
 
 ## 8. Monitoring and Maintenance
 
-- **Performance Monitoring**
-  - Integrate **Sentry** or **LogRocket** for real-time crash reporting and performance tracing.  
-  - Use Vercel’s built-in analytics to track request latencies and error rates.
+Performance Monitoring:
+- Vercel Analytics for request metrics (latency, error rates).
+- Sentry for tracing slow API calls and uncaught exceptions.
 
-- **Logging**
-  - Structured logs (JSON) for all API requests and errors, shipped to a log management service like **Datadog** or **Logflare**.
+Uptime & Alerts:
+- Health check pings with external service (e.g., UptimeRobot).
+- Alerting configured via Sentry or Datadog on critical errors.
 
-- **Health Checks**
-  - Define a `/health` endpoint that returns a 200 status if the service is up and the database is reachable.
-
-- **Maintenance Strategies**
-  - Automated migrations run on deploy to keep the database schema up to date.  
-  - Scheduled dependency audits and security scans (e.g., `npm audit`).
-  - Regular backups of the database (daily or weekly depending on usage).
+Maintenance Workflow:
+- **CI/CD pipeline** in GitHub Actions:
+  - Runs linting, unit tests, and integration tests on each pull request.
+  - Auto-deploy to staging on merge to main branch.
+- **Prisma Migrate** for versioned database changes.
+- Scheduled backups and canary deployments.
 
 ## 9. Conclusion and Overall Backend Summary
 
-The backend for **codeguide-starter** is built on Next.js API Routes and Node.js, paired with PostgreSQL for data and optional Redis for caching. It follows a clear layered architecture that keeps code easy to maintain and extend. With RESTful endpoints for authentication and data, secure practices like password hashing and HTTPS, and hosting on Vercel for scalability and global performance, this setup meets the project’s goals for a fast, secure, and developer-friendly foundation. Future enhancements—such as background job queues, advanced monitoring, or richer data models—can be added without disrupting the core structure.
+This backend is a serverless, Node.js-based API built with Next.js and TypeScript. It uses PostgreSQL via Prisma for structured data storage, all hosted on Vercel and AWS RDS. Core ideas:
+
+- **Scalable serverless functions** keep costs aligned with usage.
+- **Modular design** (controllers, services, data) ensures easy maintenance.
+- **Robust security** with hashed passwords, JWTs, HTTPS, and rate limiting.
+- **Comprehensive monitoring** via Vercel, Sentry, and external health checks.
+
+Together, these components provide a reliable, performant, and secure foundation for the airdrop-dashboard-manager. The setup allows the team to iterate quickly, add new features without major architectural changes, and serve users worldwide with low latency.
